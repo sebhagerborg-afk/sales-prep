@@ -1,71 +1,44 @@
-'use client'
+import { NextRequest, NextResponse } from 'next/server'
+import Anthropic from '@anthropic-ai/sdk'
 
-import { useEffect, useState } from 'react'
-import { createClient } from '../utils/supabase'
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+})
 
-export default function Dashboard() {
-  const [user, setUser] = useState<any>(null)
-  const [preps, setPreps] = useState<any[]>([])
-  const supabase = createClient()
+export async function POST(req: NextRequest) {
+  try {
+    const { companyName, meetingType, attendees } = await req.json()
 
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        window.location.href = '/'
-        return
-      }
-      setUser(user)
-      const { data } = await supabase
-        .from('preps')
-        .select('*')
-        .order('created_at', { ascending: false })
-      setPreps(data || [])
+    const prompt = `You are an elite sales strategist. Prepare a comprehensive meeting prep for a ${meetingType} with ${companyName}.
+${attendees ? `Attendees: ${attendees}` : ''}
+
+Provide your response in EXACTLY this JSON format (no markdown, no code blocks, just pure JSON):
+{
+  "research_brief": "2-3 paragraphs about the company: what they do, recent news, market position, key challenges, and opportunities. Be specific and actionable.",
+  "talk_tracks": "3-4 specific talk tracks tailored to this ${meetingType}. Each should have a hook, key points, and transition. Format as numbered items.",
+  "questions": "5-7 strategic questions to ask during the meeting. Mix of discovery, pain-point, and value questions. Format as numbered items.",
+  "competitive_intel": "Key competitors, how they compare, and positioning angles to use. Be specific about strengths and weaknesses."
+}`
+
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }],
+    })
+
+    const content = message.content[0]
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type')
     }
-    getUser()
-  }, [])
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    window.location.href = '/'
+    const data = JSON.parse(content.text)
+    return NextResponse.json(data)
+
+  } catch (error) {
+    console.error('API Error:', error)
+    return NextResponse.json(
+      { error: 'Failed to generate prep' },
+      { status: 500 }
+    )
   }
-
-  if (!user) return null
-
-  return (
-    <div className="min-h-screen bg-gray-950 p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Sales Prep AI</h1>
-            <p className="text-gray-400">{user.email}</p>
-          </div>
-          <div className="flex gap-3">
-            <a href="/dashboard/new" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium">+ New Prep</a>
-            <button onClick={handleSignOut} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg">Sign Out</button>
-          </div>
-        </div>
-        {preps.length === 0 ? (
-          <div className="text-center py-20">
-            <p className="text-gray-500 text-lg">No preps yet</p>
-            <p className="text-gray-600 mt-2">Click &quot;+ New Prep&quot; to prepare for your next meeting</p>
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {preps.map((prep) => (
-              <a href={`/dashboard/${prep.id}`} key={prep.id} className="bg-gray-900 p-6 rounded-xl border border-gray-800 block hover:border-gray-600 transition">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-xl font-semibold text-white">{prep.company_name}</h2>
-                    <p className="text-gray-400">{prep.meeting_type}</p>
-                  </div>
-                  <span className="text-gray-500 text-sm">{new Date(prep.created_at).toLocaleDateString()}</span>
-                </div>
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
